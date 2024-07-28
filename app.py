@@ -50,6 +50,10 @@ def progress_ratio():
 @app.route('/play', methods=['POST'])
 def play():
     post_data = request.get_json()
+
+    time.sleep(2)
+    reset_token()
+
     res = play_control(post_data)
 
     if res.status_code == 401:
@@ -229,7 +233,7 @@ def reset_token():
     if res.status_code == 200:
         access_token = json.loads(res.text)["data"]["accessToken"]
         refresh_token = json.loads(res.text)["data"]["refreshToken"]
-        logger.info("%s token已更新" % nick_name)
+        logger.info("%s token已更新 access_token: %s refresh_token: %s" % (nick_name, access_token, refresh_token))
     else:
         logger.error('%s 更新token失败 code: %s , message: %s' % (nick_name, res.status_code, res.text))
 

@@ -39,6 +39,26 @@ deactivate
 
 # iptables放开端口
 sudo iptables -A INPUT -p tcp --dport 5000 -j ACCEPT
+sudo iptables -A OUTPUT -p tcp --dport 5000 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 9999 -j ACCEPT
+sudo iptables -A OUTPUT -p tcp --dport 9999 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8090 -j ACCEPT
+# iptables关闭端口
+sudo iptables -A OUTPUT -p udp --dport 5000 -j REJECT
+sudo iptables -A OUTPUT -p tcp --dport 8090 -j REJECT
+# iptables查看端口状态
+iptables -L -n | grep 'tcp.*:8090'
 
 # 备份nginx配置
 cp nginx.conf nginx.conf.bak
+
+# 测试nginx配置文件
+nginx -t
+
+# nginx启动
+sudo service nginx restart
+
+
+
+# nginx配置
+

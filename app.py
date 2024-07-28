@@ -4,7 +4,7 @@ import logging
 import time
 
 import requests
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 access_token = ''
 refresh_token = ''
 courseware_id = ''
+token_expiration = 0
 duration = 0
 total_duration = 0
 playing = 0
@@ -41,7 +42,8 @@ def progress_ratio():
         'courseware_id': courseware_id,
         'duration': duration,
         'total_duration': total_duration,
-        'playing': playing
+        'playing': playing,
+        'token_expiration': token_expiration
     }
 
     return jsonify(ratio_object)
@@ -61,9 +63,9 @@ def play():
         res = play_control(post_data)
 
     if res.status_code != 200:
-        abort(500)
+        clear_progress()
 
-    return jsonify({'status': 'success'})
+    return ''
 
 
 # sanity check route
@@ -72,11 +74,14 @@ def get_courses():
     global access_token
     global refresh_token
     global nick_name
+    global token_expiration
     videos = []
 
     req = request.get_json()
     access_token = req.get('access_token')
     refresh_token = req.get('refresh_token')
+    token_expiration = 0
+    clear_progress()
 
     # 获取个人信息
     res = requests.get('https://jxzh.zh12333.com/zhskillApi/api/personalCenter/getPersonalInfo', headers=get_headers())
@@ -225,6 +230,7 @@ def unfinished_videos():
 def reset_token():
     global access_token
     global refresh_token
+    global token_expiration
 
     res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/auth/refreshToken",
                         headers=post_headers(),
@@ -233,9 +239,11 @@ def reset_token():
     if res.status_code == 200:
         access_token = json.loads(res.text)["data"]["accessToken"]
         refresh_token = json.loads(res.text)["data"]["refreshToken"]
-        logger.info("%s token已更新 access_token: %s refresh_token: %s" % (nick_name, access_token, refresh_token))
+        logger.info("%s token已更新" % nick_name)
     else:
-        logger.error('%s 更新token失败 code: %s , message: %s' % (nick_name, res.status_code, res.text))
+        logger.error('%s 更新token失败  access_token: %s refresh_token: %s code: %s , message: %s' % (
+            nick_name, access_token, refresh_token, res.status_code, res.text))
+        token_expiration = 1
 
     return res
 
@@ -283,12 +291,20 @@ def play_control(course):
     while playing == 1:
         # 播放已完成
         if duration >= total_duration:
-            duration = total_duration
             finish_res = do_play(
-                browse_id, course_id, courseware_id, duration, play_status["finish"],
+                browse_id, course_id, courseware_id, total_duration, play_status["finish"],
             )
             logger.info('%s 播放结束 课件: %s ' % (nick_name, courseware_id))
             return finish_res
+
+        if duration > 600:
+            reset_token()
+
+        if duration > 1200:
+            reset_token()
+
+        if duration > 1800:
+            reset_token()
 
         # 更新播放进度
         update_res = do_play(

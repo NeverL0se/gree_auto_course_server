@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-import time
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g, abort
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -19,15 +18,7 @@ logging.basicConfig(filename='app.log',
                     format='%(asctime)s - %(name)s - %(levelname)s - 进程: %(process)d - 线程: %(thread)d - 行: %(lineno)d - 方法: %(funcName)s - %(message)s')
 
 logger = logging.getLogger(__name__)
-
-access_token = ''
-refresh_token = ''
-courseware_id = ''
-token_expiration = 0
-duration = 0
-total_duration = 0
-playing = 0
-nick_name = ''
+play_type = {"play": "1", "heartbeat": "2", "pause": "3", "finish": "4"}
 
 
 @app.route('/')
@@ -36,62 +27,100 @@ def hello_world():  # put application's code here
     return 'Hello World!'
 
 
-@app.route('/ratio', methods=['GET'])
-def progress_ratio():
-    ratio_object = {
-        'courseware_id': courseware_id,
-        'duration': duration,
-        'total_duration': total_duration,
-        'playing': playing,
-        'token_expiration': token_expiration
-    }
+@app.route('/init_video', methods=['POST'])
+def init_video():
+    req = request.get_json()
+    g.access_token = req['access_token']
 
-    return jsonify(ratio_object)
+    init_res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/course/courseResourcesInit",
+                             headers=post_headers(),
+                             json={'courseId': req.get('course_id'), 'coursewareId': req.get('courseware_id')})
 
-@app.route('/play', methods=['POST'])
-def play():
-    post_data = request.get_json()
+    if init_res.status_code == 401:
+        logger.error('激活视频失败 code: %s , message: %s' % (init_res.status_code, init_res.text))
+        abort(401)
+
+    if init_res.status_code == 200:
+        video = json.loads(init_res.text)["data"]
+
+        return jsonify({
+            'browse_id': video["browseId"],
+            'duration': int(video["playbackPosition"]),
+            'total_duration': int(video["coursewareTimeLength"]),
+        })
+    else:
+        abort(500)
 
 
-    time.sleep(2)
-    reset_token()
+@app.route('/play_start', methods=['POST'])
+def play_start():
+    req = request.get_json()
+    g.access_token = req['access_token']
+    g.browse_id = req['browse_id']
+    g.course_id = req['course_id']
+    g.courseware_id = req['courseware_id']
+    g.duration = int(req['duration'])
+    g.total_duration = int(req['total_duration'])
 
-    res = play_control(post_data)
+    res = do_play(play_type["play"])
 
     if res.status_code == 401:
-        reset_token()
-        res = play_control(post_data)
-
+        abort(401)
     if res.status_code != 200:
-        clear_progress()
+        if res.status_code != 200:
+            logger.error('视频开始失败 code: %s , message: %s 课件: %s' % (res.status_code, res.text, g.courseware_id))
+    return ''
 
+
+@app.route('/play_heartbeat', methods=['POST'])
+def play_heartbeat():
+    req = request.get_json()
+    g.access_token = req['access_token']
+    g.browse_id = req['browse_id']
+    g.course_id = req['course_id']
+    g.courseware_id = req['courseware_id']
+    g.duration = int(req['duration'])
+    g.total_duration = int(req['total_duration'])
+
+    res = do_play(play_type["heartbeat"])
+
+    if res.status_code == 401:
+        abort(401)
+    if res.status_code != 200:
+        if res.status_code != 200:
+            logger.error('视频心跳失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
+                         (res.status_code, res.text, g.courseware_id, g.duration, g.total_duration))
+    return ''
+
+
+@app.route('/play_finish', methods=['POST'])
+def play_finish():
+    req = request.get_json()
+    g.access_token = req['access_token']
+    g.browse_id = req['browse_id']
+    g.course_id = req['course_id']
+    g.courseware_id = req['courseware_id']
+    g.duration = int(req['duration'])
+    g.total_duration = int(req['total_duration'])
+
+    res = do_play(play_type["finish"])
+
+    if res.status_code == 401:
+        abort(401)
+    if res.status_code != 200:
+        if res.status_code != 200:
+            logger.error('视频结束失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
+                         (res.status_code, res.text, g.courseware_id, g.duration, g.total_duration))
     return ''
 
 
 # sanity check route
 @app.route('/courses', methods=['POST'])
 def get_courses():
-    global access_token
-    global refresh_token
-    global nick_name
-    global token_expiration
     videos = []
 
     req = request.get_json()
-    access_token = req.get('access_token')
-    refresh_token = req.get('refresh_token')
-    token_expiration = 0
-    clear_progress()
-
-    # 获取个人信息
-    res = requests.get('https://jxzh.zh12333.com/zhskillApi/api/personalCenter/getPersonalInfo', headers=get_headers())
-
-    if res.status_code != 200:
-        logger.warning("get 请求: %s" % str(request.remote_addr + '无效token'))
-        return []
-
-    nick_name = json.loads(res.text)['data']['nickname']
-    logger.info("%s 请求获取所有课程" % nick_name)
+    g.access_token = req.get('access_token')
 
     for course in skill_videos():
         # 课件列表
@@ -113,7 +142,7 @@ def get_courses():
                 'browse_id': '',
                 'total_duration': '未加载',
                 'duration': 0,
-                'show': '0',
+                'playing': '0',
                 'label': '我的必修课'
 
             })
@@ -138,11 +167,11 @@ def get_courses():
                 'browse_id': '',
                 'total_duration': '未加载',
                 'duration': 0,
-                'show': '0',
+                'playing': '0',
                 'label': '学习记录'
             })
 
-    logger.info('%s 获取课程成功，数量: %s' % (nick_name, len(videos)))
+    logger.info('获取课程成功，数量: %s' % len(videos))
     return videos
 
 
@@ -155,12 +184,10 @@ def get_coursewares(course_id):
         url="https://jxzh.zh12333.com/zhskillApi/api/course/getCourseDetail?courseId=" + course_id,
         headers=get_headers())
     if res.status_code != 200:
-        logger.error('%s 获取课件失败: code: %s , message: %s' % (nick_name, res.status_code, res.text))
+        logger.error('获取课件失败: code: %s , message: %s' % (res.status_code, res.text))
         return []
 
-    course_detail = json.loads(res.text)["data"]
-
-    return course_detail["userCourseChapterBrowseResponseList"][0][
+    return json.loads(res.text)["data"]["userCourseChapterBrowseResponseList"][0][
         "coursewareProgressResponseList"
     ]
 
@@ -180,7 +207,7 @@ def skill_videos():
             headers=get_headers())
 
         if res.status_code != 200:
-            logger.error('%s 获取必修课失败: code: %s , message: %s' % (nick_name, res.status_code, res.text))
+            logger.error('获取必修课失败: code: %s , message: %s' % (res.status_code, res.text))
             return []
 
         courses = json.loads(res.text)["data"]
@@ -209,7 +236,7 @@ def unfinished_videos():
             headers=get_headers())
 
         if res.status_code != 200:
-            logger.error('%s 获取学习记录失败: code: %s , message: %s' % (nick_name, res.status_code, res.text))
+            logger.error('获取学习记录失败: code: %s , message: %s' % (res.status_code, res.text))
             return []
 
         courses = json.loads(res.text)["data"]
@@ -227,140 +254,42 @@ def unfinished_videos():
     return videos
 
 
-def reset_token():
-    global access_token
-    global refresh_token
-    global token_expiration
+@app.route('/refresh_token', methods=['POST'])
+def refresh_token():
+    req = request.get_json()
+    g.access_token = req['access_token']
+    g.refresh_token = req['refresh_token']
 
     res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/auth/refreshToken",
                         headers=post_headers(),
-                        json={"refreshToken": refresh_token})
+                        json={"refreshToken": g.refresh_token})
 
     if res.status_code == 200:
-        access_token = json.loads(res.text)["data"]["accessToken"]
-        refresh_token = json.loads(res.text)["data"]["refreshToken"]
-        logger.info("%s token已更新" % nick_name)
+        token = json.loads(res.text)["data"]
+        logger.info("token已更新")
     else:
-        logger.error('%s 更新token失败  access_token: %s refresh_token: %s code: %s , message: %s' % (
-            nick_name, access_token, refresh_token, res.status_code, res.text))
-        token_expiration = 1
+        logger.error('更新token失败')
+        abort(401)
 
-    return res
-
-
-def play_control(course):
-    global courseware_id
-    global duration
-    global total_duration
-    global playing
-    play_status = {"play": "1", "update": "2", "pause": "3", "finish": "4"}
-
-    # 激活视频
-    init_res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/course/courseResourcesInit",
-                             headers=post_headers(),
-                             json={'courseId': course['course_id'], 'coursewareId': course['courseware_id']})
-
-    if init_res.status_code != 200:
-        logger.error('%s 激活视频失败 code: %s , message: %s' % (nick_name, init_res.status_code, init_res.text))
-        clear_progress()
-        return init_res
-
-    video = json.loads(init_res.text)["data"]
-
-    course_id = course["course_id"]
-    courseware_id = course["courseware_id"]
-    duration = int(video["playbackPosition"])
-    total_duration = int(video["coursewareTimeLength"])
-    browse_id = video["browseId"]
-    logger.info('%s 开始播放 课件: %s' % (nick_name, courseware_id))
-
-    # 开始播放
-    if duration < total_duration:
-        play_res = do_play(
-            browse_id, course_id, courseware_id, duration, play_status["play"]
-        )
-
-        if play_res.status_code != 200:
-            logger.error(
-                '%s 开始播放视频失败 code: %s , message: %s' % (nick_name, play_res.status_code, play_res.text))
-            clear_progress()
-            return play_res
-
-    playing = 1
-
-    while playing == 1:
-        # 播放已完成
-        if duration >= total_duration:
-            finish_res = do_play(
-                browse_id, course_id, courseware_id, total_duration, play_status["finish"],
-            )
-            logger.info('%s 播放结束 课件: %s ' % (nick_name, courseware_id))
-            return finish_res
-
-        if duration > 600:
-            reset_token()
-
-        if duration > 1200:
-            reset_token()
-
-        if duration > 1800:
-            reset_token()
-
-        # 更新播放进度
-        update_res = do_play(
-            browse_id, course_id, courseware_id, duration, play_status["update"]
-        )
-        '''
-        update_res = do_play(
-            browse_id, course_id, courseware_id, duration, play_status["pause"]
-        )
-        update_res = do_play(
-            browse_id, course_id, courseware_id, duration, play_status["play"]
-        )
-        '''
-        if update_res.status_code != 200:
-            return update_res
-
-        # logger.info('%s 正在播放 课件: %s 当前时长: %s 总时长: %s' % (nick_name, courseware_id, duration, total_duration))
-
-        duration += 3
-        time.sleep(3)
-
-
-def clear_progress():
-    global courseware_id
-    global duration
-    global total_duration
-    global playing
-
-    courseware_id = ''
-    duration = 0
-    total_duration = 0
-    playing = 0
-
-    return
+    return jsonify({
+        'access_token': token["accessToken"],
+        'refresh_token': token["refreshToken"]
+    })
 
 
 # 播放控制
-def do_play(browse_id, course_id, courseware_id, position, status):
-    res = requests.post(
+def do_play(play_status):
+    return requests.post(
         "https://jxzh.zh12333.com/zhskillApi/api/course/playControl",
         headers=post_headers(),
         json={
-            "courseId": course_id,
-            "coursewareId": courseware_id,
-            "browseId": browse_id,
-            "playbackPosition": position,
-            "playStatus": status,
+            "courseId": g.course_id,
+            "coursewareId": g.courseware_id,
+            "browseId": g.browse_id,
+            "playbackPosition": g.duration,
+            "playStatus": play_status,
         }
     )
-    if res.status_code != 200:
-        logger.error('%s 播放视频失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
-                     (nick_name, res.status_code, res.text, courseware_id, duration, total_duration))
-
-        clear_progress()
-
-    return res
 
 
 def post_headers():
@@ -368,7 +297,7 @@ def post_headers():
         "Accept": "application/json",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Authorization": access_token,
+        "Authorization": g.access_token,
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "Content-Length": "182",
@@ -393,7 +322,7 @@ def get_headers():
         "Accept": "application/json",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Authorization": access_token,
+        "Authorization": g.access_token,
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "Content-Type": "application/json",

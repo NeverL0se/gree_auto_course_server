@@ -52,6 +52,7 @@ def progress_ratio():
 def play():
     post_data = request.get_json()
 
+
     time.sleep(2)
     reset_token()
 

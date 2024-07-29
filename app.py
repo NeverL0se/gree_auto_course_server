@@ -48,7 +48,6 @@ def progress_ratio():
 
     return jsonify(ratio_object)
 
-
 @app.route('/play', methods=['POST'])
 def play():
     post_data = request.get_json()

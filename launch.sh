@@ -59,6 +59,5 @@ nginx -t
 sudo service nginx restart
 
 
-
-# nginx配置
+https://apifox.com/apiskills/axios-cross-origin/
 

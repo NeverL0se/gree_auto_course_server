@@ -12,7 +12,7 @@ pip install -r requirements.txt
 
 
 # 启动 gunicorn 回环ip
-gunicorn -w 5 -b 127.0.0.1:5000 app:app -D --timeout 3000
+gunicorn -w 5 -b 127.0.0.1:5000 app:app -D --timeout 600
 # 启动 gunicorn 放开所有ip
 gunicorn -w 5 -b 0.0.0.0:5000 app:app -D
 # 查看gunicorn的进程状态

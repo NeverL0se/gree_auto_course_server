@@ -19,6 +19,7 @@ logging.basicConfig(filename='app.log',
 
 logger = logging.getLogger(__name__)
 play_type = {"play": "1", "heartbeat": "2", "pause": "3", "finish": "4"}
+requests.packages.urllib3.disable_warnings()
 
 
 @app.route('/')
@@ -34,7 +35,8 @@ def init_video():
 
     init_res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/course/courseResourcesInit",
                              headers=post_headers(),
-                             json={'courseId': req.get('course_id'), 'coursewareId': req.get('courseware_id')})
+                             json={'courseId': req.get('course_id'), 'coursewareId': req.get('courseware_id')},
+                             verify=False)
 
     if init_res.status_code == 401:
         logger.error('激活视频失败 code: %s , message: %s' % (init_res.status_code, init_res.text))
@@ -69,6 +71,8 @@ def play_start():
     if res.status_code != 200:
         if res.status_code != 200:
             logger.error('视频开始失败 code: %s , message: %s 课件: %s' % (res.status_code, res.text, g.courseware_id))
+
+    res.close()
     return ''
 
 
@@ -90,6 +94,7 @@ def play_heartbeat():
         if res.status_code != 200:
             logger.error('视频心跳失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
                          (res.status_code, res.text, g.courseware_id, g.duration, g.total_duration))
+    res.close()
     return ''
 
 
@@ -107,10 +112,14 @@ def play_finish():
 
     if res.status_code == 401:
         abort(401)
+
+    if res.status_code == 400:
+        abort(400)
     if res.status_code != 200:
         if res.status_code != 200:
             logger.error('视频结束失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
                          (res.status_code, res.text, g.courseware_id, g.duration, g.total_duration))
+    res.close()
     return ''
 
 
@@ -121,6 +130,16 @@ def get_courses():
 
     req = request.get_json()
     g.access_token = req.get('access_token')
+
+    # 获取个人信息
+    res = requests.get('https://jxzh.zh12333.com/zhskillApi/api/personalCenter/getPersonalInfo', headers=get_headers(),
+                       verify=False)
+
+    if res.status_code != 200:
+        logger.warning("get 请求: %s" % str(request.remote_addr + '无效token'))
+        return []
+    g.nick_name = json.loads(res.text)['data']['nickname']
+    logger.info("%s 登录" % g.nick_name)
 
     for course in skill_videos():
         # 课件列表
@@ -146,6 +165,7 @@ def get_courses():
                 'label': '我的必修课'
 
             })
+    logger.info("%s 加载必修课课件成功 数量: %s" % (g.nick_name, len(videos)))
 
     for course in unfinished_videos():
         # 课件列表
@@ -171,7 +191,13 @@ def get_courses():
                 'label': '学习记录'
             })
 
-    logger.info('获取课程成功，数量: %s' % len(videos))
+    logger.info('%s 全部课程获取成功，数量: %s' % (g.nick_name, len(videos)))
+
+    del videos[0]
+    del videos[0]
+    del videos[0]
+    del videos[0]
+    del videos[0]
     return videos
 
 
@@ -182,7 +208,7 @@ if __name__ == '__main__':
 def get_coursewares(course_id):
     res = requests.get(
         url="https://jxzh.zh12333.com/zhskillApi/api/course/getCourseDetail?courseId=" + course_id,
-        headers=get_headers())
+        headers=get_headers(), verify=False)
     if res.status_code != 200:
         logger.error('获取课件失败: code: %s , message: %s' % (res.status_code, res.text))
         return []
@@ -204,12 +230,12 @@ def skill_videos():
         res = requests.get(
             url="https://jxzh.zh12333.com/zhskillApi/api/personalCenter/getSkillCourseInfoList?isComplete=0&pageSize=12&pageNum=" +
                 str(page_num),
-            headers=get_headers())
+            headers=get_headers(), verify=False)
 
         if res.status_code != 200:
             logger.error('获取必修课失败: code: %s , message: %s' % (res.status_code, res.text))
             return []
-
+        # logger.info("%s 必修课分页成功: 第%s页" % (g.nick_name, page_num))
         courses = json.loads(res.text)["data"]
         total = int(courses["total"])
         current += len(courses["rows"])
@@ -218,6 +244,8 @@ def skill_videos():
 
         if current == total:
             break
+
+    # logger.info("%s 获取必修课成功 数量: %s" % (g.nick_name, len(videos)))
     return videos
 
 
@@ -233,7 +261,7 @@ def unfinished_videos():
         res = requests.get(
             url="https://jxzh.zh12333.com/zhskillApi/api/personalCenter/getLearningRecordsList?pageSize=12&pageNum="
                 + str(page_num),
-            headers=get_headers())
+            headers=get_headers(), verify=False)
 
         if res.status_code != 200:
             logger.error('获取学习记录失败: code: %s , message: %s' % (res.status_code, res.text))
@@ -250,7 +278,7 @@ def unfinished_videos():
 
         if current == total:
             break
-
+        # logger.info("%s 获取学习记录成功 数量: %s" % (g.nick_name, len(videos)))
     return videos
 
 
@@ -262,7 +290,7 @@ def refresh_token():
 
     res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/auth/refreshToken",
                         headers=post_headers(),
-                        json={"refreshToken": g.refresh_token})
+                        json={"refreshToken": g.refresh_token}, verify=False)
 
     if res.status_code == 200:
         token = json.loads(res.text)["data"]
@@ -288,7 +316,7 @@ def do_play(play_status):
             "browseId": g.browse_id,
             "playbackPosition": g.duration,
             "playStatus": play_status,
-        }
+        }, verify=False
     )
 
 

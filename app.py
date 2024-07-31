@@ -193,11 +193,6 @@ def get_courses():
 
     logger.info('%s 全部课程获取成功，数量: %s' % (g.nick_name, len(videos)))
 
-    del videos[0]
-    del videos[0]
-    del videos[0]
-    del videos[0]
-    del videos[0]
     return videos
 
 

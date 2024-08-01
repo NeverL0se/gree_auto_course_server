@@ -19,13 +19,37 @@ logging.basicConfig(filename='app.log',
 
 logger = logging.getLogger(__name__)
 play_type = {"play": "1", "heartbeat": "2", "pause": "3", "finish": "4"}
-requests.packages.urllib3.disable_warnings()
+
+
+# requests.packages.urllib3.disable_warnings()
 
 
 @app.route('/')
 def hello_world():  # put application's code here
-
     return 'Hello World!'
+
+
+@app.route('/refresh_token', methods=['POST'])
+def refresh_token():
+    req = request.get_json()
+    g.access_token = req['access_token']
+    g.refresh_token = req['refresh_token']
+
+    res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/auth/refreshToken",
+                        headers=post_headers(),
+                        json={"refreshToken": g.refresh_token}, verify=False)
+
+    if res.status_code == 200:
+        token = json.loads(res.text)["data"]
+        logger.info("token已更新")
+    else:
+        logger.error('更新token失败')
+        abort(401)
+
+    return jsonify({
+        'access_token': token["accessToken"],
+        'refresh_token': token["refreshToken"]
+    })
 
 
 @app.route('/init_video', methods=['POST'])
@@ -90,6 +114,8 @@ def play_heartbeat():
 
     if res.status_code == 401:
         abort(401)
+    if res.status_code == 400:
+        abort(400)
     if res.status_code != 200:
         if res.status_code != 200:
             logger.error('视频心跳失败 code: %s , message: %s 课件: %s 当前时长: %s 总时长: %s ' %
@@ -196,10 +222,6 @@ def get_courses():
     return videos
 
 
-if __name__ == '__main__':
-    app.run()
-
-
 def get_coursewares(course_id):
     res = requests.get(
         url="https://jxzh.zh12333.com/zhskillApi/api/course/getCourseDetail?courseId=" + course_id,
@@ -277,29 +299,6 @@ def unfinished_videos():
     return videos
 
 
-@app.route('/refresh_token', methods=['POST'])
-def refresh_token():
-    req = request.get_json()
-    g.access_token = req['access_token']
-    g.refresh_token = req['refresh_token']
-
-    res = requests.post(url="https://jxzh.zh12333.com/zhskillApi/api/auth/refreshToken",
-                        headers=post_headers(),
-                        json={"refreshToken": g.refresh_token}, verify=False)
-
-    if res.status_code == 200:
-        token = json.loads(res.text)["data"]
-        logger.info("token已更新")
-    else:
-        logger.error('更新token失败')
-        abort(401)
-
-    return jsonify({
-        'access_token': token["accessToken"],
-        'refresh_token': token["refreshToken"]
-    })
-
-
 # 播放控制
 def do_play(play_status):
     return requests.post(
@@ -361,3 +360,7 @@ def get_headers():
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
     }
+
+
+if __name__ == '__main__':
+    app.run()
